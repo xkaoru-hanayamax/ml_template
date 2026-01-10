@@ -4,6 +4,7 @@ services:
   titanic:
     build: .
     volumes:
+      - .:/app
       - ./data:/app/data
       - ./models:/app/models
       - ./output:/app/output

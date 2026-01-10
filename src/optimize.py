@@ -251,7 +251,7 @@ def run_optimize(n_trials=100):
         },
         'best_iteration': mean_best_iteration,
         'optuna_study': {
-            'n_trials': study.n_trials,
+            'n_trials': len(study.trials),
             'best_trial_number': study.best_trial.number,
             'best_value': float(study.best_value)
         },
