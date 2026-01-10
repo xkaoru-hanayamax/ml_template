@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  titanic:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./output:/app/output
+    command: /bin/bash
+    stdin_open: true
+    tty: true
