@@ -10,8 +10,13 @@ matplotlib.use('Agg')  # 非対話型バックエンド（サーバー環境対�
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from src.preprocessor import preprocess_train
-from src.config import DatasetConfig
+try:
+    from src.preprocessor import preprocess_train
+    from src.config import DatasetConfig
+except ImportError:
+    # For Jupyter Notebook compatibility
+    preprocess_train = None
+    DatasetConfig = None
 
 
 def plot_learning_curves(fold_metrics_history, output_dir='output'):
@@ -352,6 +357,229 @@ def run_train(config: DatasetConfig,
     print("\n" + "=" * 60)
     print("Training completed successfully!")
     print("=" * 60)
+
+
+# ========== Jupyter Notebook用の独立した関数 ==========
+
+def train_model(
+    train_data_path: str,
+    target_col: str,
+    id_col: str,
+    categorical_cols: list = None,
+    params: dict = None,
+    num_boost_round: int = 1000,
+    early_stopping_rounds: int = 50,
+    n_folds: int = 5,
+    generate_plots: bool = True,
+    model_output_dir: str = 'models',
+    plots_output_dir: str = 'output'
+) -> dict:
+    """
+    LightGBMモデルの学習を実行（Jupyter Notebook用）
+
+    この関数は完全に独立しており、src モジュールへの依存はありません。
+
+    Args:
+        train_data_path: 前処理済み訓練データのCSVパス（例: 'processed_data/processed_train.csv'）
+        target_col: ターゲット列の名前（例: 'Survived'）
+        id_col: ID列の名前（例: 'PassengerId'）
+        categorical_cols: カテゴリカル列のリスト（例: ['Sex', 'Embarked']）
+        params: LightGBMパラメータ辞書（Noneの場合はデフォルト値）
+        num_boost_round: ブースティング回数（デフォルト: 1000）
+        early_stopping_rounds: Early stoppingのラウンド数（デフォルト: 50）
+        n_folds: CV のフォールド数（デフォルト: 5）
+        generate_plots: グラフを生成するか（デフォルト: True）
+        model_output_dir: モデル保存ディレクトリ（デフォルト: 'models'）
+        plots_output_dir: グラフ保存ディレクトリ（デフォルト: 'output'）
+
+    Returns:
+        dict: 以下のキーを含む辞書
+            - 'model_path': 保存されたモデルのパス
+            - 'cv_scores': 各フォールドのスコアのリスト
+            - 'mean_accuracy': 平均CV精度
+            - 'std_accuracy': CV精度の標準偏差
+            - 'feature_importance': 特徴量重要度のDataFrame
+
+    Jupyter使用例:
+        ```python
+        result = train_model(
+            train_data_path='processed_data/processed_train.csv',
+            target_col='Survived',
+            id_col='PassengerId',
+            categorical_cols=['Sex', 'Embarked'],
+            generate_plots=True
+        )
+        print(f"Mean accuracy: {result['mean_accuracy']:.4f}")
+        print(f"Model saved to: {result['model_path']}")
+        ```
+    """
+    if categorical_cols is None:
+        categorical_cols = []
+
+    print("=" * 60)
+    print("Training LightGBM Model (Jupyter Notebook)")
+    print("=" * 60)
+
+    # 1. データ読込
+    print(f"\n[1/7] Loading training data from {train_data_path}...")
+    df = pd.read_csv(train_data_path)
+    print(f"  Loaded {len(df)} rows, {len(df.columns)} columns")
+
+    # カテゴリカル列を'category'型に変換
+    for col in categorical_cols:
+        if col in df.columns:
+            df[col] = df[col].astype('category')
+        else:
+            print(f"  Warning: Categorical column '{col}' not found in data")
+
+    # ターゲットとIDを分離
+    if target_col not in df.columns:
+        raise ValueError(f"Target column '{target_col}' not found in data")
+    if id_col not in df.columns:
+        raise ValueError(f"ID column '{id_col}' not found in data")
+
+    y = df[target_col]
+    X = df.drop(columns=[id_col, target_col])
+
+    print(f"  Features: {list(X.columns)}")
+    print(f"  Shape: {X.shape}")
+    print(f"  Missing values: {X.isnull().sum().to_dict()}")
+
+    # 2. LightGBMパラメータ設定
+    print("\n[2/7] Setting up parameters...")
+    if params is None:
+        params = {
+            'objective': 'binary',
+            'metric': 'binary_logloss',
+            'boosting_type': 'gbdt',
+            'num_leaves': 31,
+            'learning_rate': 0.05,
+            'feature_fraction': 0.9,
+            'verbose': -1,
+            'random_state': 42
+        }
+    print(f"  Parameters: {params}")
+
+    # 3. K-Fold Cross Validation
+    print(f"\n[3/7] Running {n_folds}-Fold Cross Validation...")
+    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
+    cv_scores = []
+    best_iterations = []
+    fold_metrics_history = []
+
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X, y), 1):
+        X_train_fold, X_val_fold = X.iloc[train_idx], X.iloc[val_idx]
+        y_train_fold, y_val_fold = y.iloc[train_idx], y.iloc[val_idx]
+
+        # LightGBM Dataset作成
+        train_data = lgb.Dataset(
+            X_train_fold,
+            label=y_train_fold,
+            categorical_feature=categorical_cols
+        )
+        val_data = lgb.Dataset(
+            X_val_fold,
+            label=y_val_fold,
+            categorical_feature=categorical_cols,
+            reference=train_data
+        )
+
+        # メトリクスを記録するための辞書
+        evals_result = {}
+
+        # 学習
+        model = lgb.train(
+            params,
+            train_data,
+            num_boost_round=num_boost_round,
+            valid_sets=[train_data, val_data],
+            valid_names=['train', 'valid'],
+            callbacks=[
+                lgb.early_stopping(stopping_rounds=early_stopping_rounds),
+                lgb.log_evaluation(period=0),
+                lgb.record_evaluation(evals_result)
+            ]
+        )
+
+        # このfoldのメトリクスを保存
+        fold_metrics_history.append(evals_result)
+
+        # 検証データで予測
+        y_pred_proba = model.predict(X_val_fold, num_iteration=model.best_iteration)
+        y_pred = (y_pred_proba > 0.5).astype(int)
+        accuracy = accuracy_score(y_val_fold, y_pred)
+        cv_scores.append(accuracy)
+        best_iterations.append(model.best_iteration)
+
+        print(f"  Fold {fold}: Accuracy = {accuracy:.4f}, Best iteration = {model.best_iteration}")
+
+    # 4. CV結果サマリ
+    print("\n[4/7] Cross Validation Results:")
+    mean_accuracy = np.mean(cv_scores)
+    std_accuracy = np.std(cv_scores)
+    print(f"  Mean Accuracy: {mean_accuracy:.4f} ± {std_accuracy:.4f}")
+    print(f"  Individual scores: {[f'{s:.4f}' for s in cv_scores]}")
+    print(f"  Mean best iteration: {int(np.mean(best_iterations))}")
+
+    # 5. 学習曲線の生成（オプション）
+    if generate_plots:
+        print("\n[5/7] Generating learning curves...")
+        plot_learning_curves(fold_metrics_history, output_dir=plots_output_dir)
+    else:
+        print("\n[5/7] Skipping plot generation (generate_plots=False)")
+
+    # 6. 全訓練データで最終モデル学習
+    print("\n[6/7] Training final model on full dataset...")
+    final_train_data = lgb.Dataset(
+        X,
+        label=y,
+        categorical_feature=categorical_cols
+    )
+
+    final_model = lgb.train(
+        params,
+        final_train_data,
+        num_boost_round=int(np.mean(best_iterations)),
+        callbacks=[lgb.log_evaluation(period=0)]
+    )
+
+    # 7. モデル保存
+    os.makedirs(model_output_dir, exist_ok=True)
+    model_path = os.path.join(model_output_dir, 'lightgbm_model.txt')
+    final_model.save_model(model_path)
+    print(f"  Model saved to {model_path}")
+
+    # 8. 特徴量重要度
+    print("\n[7/7] Feature Importance:")
+    importance = final_model.feature_importance(importance_type='gain')
+    feature_names = X.columns
+    importance_df = pd.DataFrame({
+        'feature': feature_names,
+        'importance': importance
+    }).sort_values('importance', ascending=False)
+
+    for idx, row in importance_df.iterrows():
+        print(f"  {row['feature']:12s}: {row['importance']:8.0f}")
+
+    # 特徴量重要度と部分依存プロットの生成（オプション）
+    if generate_plots:
+        print("\n  Generating feature importance plot...")
+        plot_feature_importance(importance_df, output_dir=plots_output_dir)
+
+        print("\n  Generating partial dependence plots...")
+        plot_partial_dependence(final_model, X, categorical_cols, output_dir=plots_output_dir)
+
+    print("\n" + "=" * 60)
+    print("Training completed successfully!")
+    print("=" * 60)
+
+    return {
+        'model_path': model_path,
+        'cv_scores': cv_scores,
+        'mean_accuracy': float(mean_accuracy),
+        'std_accuracy': float(std_accuracy),
+        'feature_importance': importance_df
+    }
 
 
 if __name__ == '__main__':

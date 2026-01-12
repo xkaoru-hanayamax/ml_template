@@ -18,6 +18,9 @@ output/
 *.swo
 *~
 
+# Claude Code temporary files
+tmpclaude-*-cwd
+
 # Python
 __pycache__/
 *.py[cod]
