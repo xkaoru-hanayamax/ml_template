@@ -4,15 +4,15 @@ import pickle
 import os
 
 from src.preprocessor import preprocess_test
+from src.config import DatasetConfig
 
 
-def run_predict():
+def run_predict(config: DatasetConfig):
     """
     学習済みモデルで予測を実行
-    - テストデータを読込
-    - モデルをロード
-    - 予測を実行
-    - submission.csvを作成
+
+    Args:
+        config: データセット設定
     """
     print("=" * 60)
     print("Generating Predictions")
@@ -35,12 +35,12 @@ def run_predict():
 
     # 2. データ読込
     print("\n[1/5] Loading test data...")
-    test_df = pd.read_csv('data/test.csv')
+    test_df = pd.read_csv(config.test_path)
     print(f"  Loaded {len(test_df)} rows")
 
     # 3. 前処理
     print("\n[2/5] Preprocessing...")
-    X_test, passenger_ids = preprocess_test(test_df)
+    X_test, ids = preprocess_test(test_df, config)
     print(f"  Features: {list(X_test.columns)}")
     print(f"  Shape: {X_test.shape}")
     print(f"  Missing values: {X_test.isnull().sum().to_dict()}")
@@ -65,8 +65,8 @@ def run_predict():
     # 6. Submission作成
     print("\n[5/5] Creating submission file...")
     submission = pd.DataFrame({
-        'PassengerId': passenger_ids,
-        'Survived': y_pred
+        config.id_col: ids,
+        config.submission_col_target: y_pred
     })
 
     os.makedirs('output', exist_ok=True)

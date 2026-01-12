@@ -13,12 +13,13 @@ import os
 from datetime import datetime
 
 from src.preprocessor import preprocess_train
+from src.config import DatasetConfig
 
 
 # Global variables for data (avoid re-loading in each trial)
 X_global = None
 y_global = None
-categorical_features = ['Sex', 'Embarked']
+config_global = None
 
 
 def objective(trial):
@@ -31,6 +32,7 @@ def objective(trial):
     Returns:
         float: Mean accuracy across 5-fold CV
     """
+    global config_global
     # Suggest hyperparameters
     params = {
         'objective': 'binary',
@@ -63,12 +65,12 @@ def objective(trial):
         train_data = lgb.Dataset(
             X_train_fold,
             label=y_train_fold,
-            categorical_feature=categorical_features
+            categorical_feature=config.categorical_cols
         )
         val_data = lgb.Dataset(
             X_val_fold,
             label=y_val_fold,
-            categorical_feature=categorical_features,
+            categorical_feature=config.categorical_cols,
             reference=train_data
         )
 
@@ -101,19 +103,15 @@ def objective(trial):
     return np.mean(cv_scores)
 
 
-def run_optimize(n_trials=100):
+def run_optimize(config: DatasetConfig, n_trials: int = 100):
     """
     Run Optuna hyperparameter optimization and train final model
 
-    - Optimize hyperparameters with Optuna (100 trials by default)
-    - Train final model with best parameters on full dataset
-    - Save model as pkl file
-    - Save parameters and CV results as json file
-
     Args:
+        config: データセット設定
         n_trials: Number of Optuna trials (default: 100)
     """
-    global X_global, y_global
+    global X_global, y_global, config_global
 
     print("=" * 60)
     print("Optuna Hyperparameter Optimization + Final Model Training")
@@ -121,10 +119,11 @@ def run_optimize(n_trials=100):
 
     # 1. Load and preprocess data
     print("\n[1/6] Loading training data...")
-    train_df = pd.read_csv('data/train.csv')
+    config_global = config
+    train_df = pd.read_csv(config.train_path)
     print(f"  Loaded {len(train_df)} rows")
 
-    X_global, y_global = preprocess_train(train_df)
+    X_global, y_global = preprocess_train(train_df, config)
     print(f"  Features: {list(X_global.columns)}")
     print(f"  Shape: {X_global.shape}")
     print(f"  Missing values: {X_global.isnull().sum().to_dict()}")
@@ -179,12 +178,12 @@ def run_optimize(n_trials=100):
         train_data = lgb.Dataset(
             X_train_fold,
             label=y_train_fold,
-            categorical_feature=categorical_features
+            categorical_feature=config.categorical_cols
         )
         val_data = lgb.Dataset(
             X_val_fold,
             label=y_val_fold,
-            categorical_feature=categorical_features,
+            categorical_feature=config.categorical_cols,
             reference=train_data
         )
 
@@ -221,7 +220,7 @@ def run_optimize(n_trials=100):
     final_train_data = lgb.Dataset(
         X_global,
         label=y_global,
-        categorical_feature=categorical_features
+        categorical_feature=config.categorical_cols
     )
 
     final_model = lgb.train(
