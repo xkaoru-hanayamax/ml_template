@@ -110,7 +110,7 @@ def plot_feature_importance(importance_df, output_dir='output'):
 
     # 重要度降順でソート済みのDataFrameを使用
     sns.barplot(data=importance_df, x='importance', y='feature',
-                hue='feature', palette='viridis', legend=False, ax=ax)
+                palette='viridis', ax=ax)
     ax.set_xlabel('Importance (Gain)', fontsize=12)
     ax.set_ylabel('Feature', fontsize=12)
     ax.set_title('Feature Importance', fontsize=14, fontweight='bold')
